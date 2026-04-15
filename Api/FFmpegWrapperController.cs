@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 namespace JellyfinUpscalerPlugin.Api
 {
     [ApiController]
-    [Authorize(Policy = "RequiresElevation")]
+    [Authorize]
     [Route("api/upscaler/wrapper")]
     [Route("upscaler/wrapper")]
     public class FFmpegWrapperController : ControllerBase
@@ -121,3 +121,4 @@ namespace JellyfinUpscalerPlugin.Api
         public string Message { get; set; } = string.Empty;
     }
 }
+

@@ -5,6 +5,8 @@ using MediaBrowser.Controller;
 using MediaBrowser.Model.Tasks;
 using JellyfinUpscalerPlugin.Services;
 using JellyfinUpscalerPlugin.ScheduledTasks;
+using JellyfinUpscalerPlugin.Controllers.Endpoints;
+using JellyfinUpscalerPlugin.Controllers.Helpers;
 
 namespace JellyfinUpscalerPlugin
 {
@@ -41,6 +43,7 @@ namespace JellyfinUpscalerPlugin
             serviceCollection.AddSingleton<HardwareBenchmarkService>();
             serviceCollection.AddHostedService<UpscalerService>();
             serviceCollection.AddHostedService(sp => sp.GetRequiredService<HardwareBenchmarkService>());
+            serviceCollection.AddHostedService<WrapperConfigMonitor>();
 
             // Processing Queue
             serviceCollection.AddSingleton<ProcessingQueue>();
@@ -55,6 +58,24 @@ namespace JellyfinUpscalerPlugin
             // Platform & Interop
             serviceCollection.AddSingleton<IPlatformDetectionService, PlatformDetectionService>();
             serviceCollection.AddSingleton<IFFmpegWrapperService, FFmpegWrapperService>();
+
+            // ═══════════════════════════════════════════════════════════════
+            // Refactored Endpoint Controllers (Phase 2)
+            // ═══════════════════════════════════════════════════════════════
+            
+            // Helper Services
+            serviceCollection.AddSingleton<RateLimiter>();
+            // Note: ValidationHelper is a static class and doesn't need registration
+
+            // Endpoint Controllers (registered as transient for per-request lifecycle)
+            serviceCollection.AddTransient<ModelEndpoints>();
+            serviceCollection.AddTransient<ImageEndpoints>();
+            serviceCollection.AddTransient<VideoEndpoints>();
+            serviceCollection.AddTransient<QueueEndpoints>();
+            serviceCollection.AddTransient<DiagnosticsEndpoints>();
+            serviceCollection.AddTransient<SettingsEndpoints>();
+            serviceCollection.AddTransient<ProxyEndpoints>();
+            serviceCollection.AddTransient<UtilityEndpoints>();
         }
     }
 }

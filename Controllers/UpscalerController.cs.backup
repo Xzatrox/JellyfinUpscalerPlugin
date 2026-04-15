@@ -1,0 +1,433 @@
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+using System.Net.Mime;
+using JellyfinUpscalerPlugin.Controllers.Endpoints;
+using JellyfinUpscalerPlugin.Models;
+
+namespace JellyfinUpscalerPlugin.Controllers
+{
+    /// <summary>
+    /// AI Upscaler API Controller - Refactored to delegate to endpoint classes
+    /// </summary>
+    [ApiController]
+    [Authorize]
+    [Route("[controller]")]
+    public class UpscalerController : ControllerBase
+    {
+        private readonly ILogger<UpscalerController> _logger;
+        private readonly ModelEndpoints _modelEndpoints;
+        private readonly ImageEndpoints _imageEndpoints;
+        private readonly VideoEndpoints _videoEndpoints;
+        private readonly QueueEndpoints _queueEndpoints;
+        private readonly DiagnosticsEndpoints _diagnosticsEndpoints;
+        private readonly SettingsEndpoints _settingsEndpoints;
+        private readonly ProxyEndpoints _proxyEndpoints;
+        private readonly UtilityEndpoints _utilityEndpoints;
+
+        public UpscalerController(
+            ILogger<UpscalerController> logger,
+            ModelEndpoints modelEndpoints,
+            ImageEndpoints imageEndpoints,
+            VideoEndpoints videoEndpoints,
+            QueueEndpoints queueEndpoints,
+            DiagnosticsEndpoints diagnosticsEndpoints,
+            SettingsEndpoints settingsEndpoints,
+            ProxyEndpoints proxyEndpoints,
+            UtilityEndpoints utilityEndpoints)
+        {
+            _logger = logger;
+            _modelEndpoints = modelEndpoints;
+            _imageEndpoints = imageEndpoints;
+            _videoEndpoints = videoEndpoints;
+            _queueEndpoints = queueEndpoints;
+            _diagnosticsEndpoints = diagnosticsEndpoints;
+            _settingsEndpoints = settingsEndpoints;
+            _proxyEndpoints = proxyEndpoints;
+            _utilityEndpoints = utilityEndpoints;
+        }
+
+        // ════════════════════════════════════════════════════════════════════
+        // Model Endpoints
+        // ════════════════════════════════════════════════════════════════════
+
+        [HttpGet("models")]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult> GetAvailableModels()
+            => _modelEndpoints.GetAvailableModels(HttpContext);
+
+        [HttpGet("recommend-model")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult<object>> RecommendModel(
+            [FromQuery] string? genres = null,
+            [FromQuery] int width = 0,
+            [FromQuery] int height = 0,
+            [FromQuery] bool isBatch = true)
+            => _modelEndpoints.RecommendModel(genres, width, height, isBatch);
+
+        [HttpGet("models/disk-usage")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult> ModelsDiskUsage()
+            => _proxyEndpoints.ModelsDiskUsage(HttpContext);
+
+        [HttpPost("models/cleanup")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult> ModelsCleanup([FromQuery] int max_age_days = 30, [FromQuery] bool dry_run = true)
+            => _proxyEndpoints.ModelsCleanup(max_age_days, dry_run, HttpContext);
+
+        // ════════════════════════════════════════════════════════════════════
+        // Image Endpoints
+        // ════════════════════════════════════════════════════════════════════
+
+        [HttpPost("upscale/image")]
+        [Authorize]
+        [Consumes("application/octet-stream")]
+        [Produces("application/octet-stream")]
+        [RequestSizeLimit(52428800)] // 50MB max
+        public Task<ActionResult> UpscaleImage([FromQuery] string model = "realesrgan-x4", [FromQuery] int scale = 2)
+            => _imageEndpoints.UpscaleImage(model, scale, HttpContext);
+
+        [HttpPost("upscale-images/{itemId}")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult<object>> UpscaleItemImages(
+            string itemId,
+            [FromQuery] string model = "auto",
+            [FromQuery] int scale = 2,
+            [FromQuery] string? imageTypes = null)
+            => _imageEndpoints.UpscaleItemImages(itemId, model, scale, imageTypes, HttpContext);
+
+        [HttpGet("compare/{itemId}")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult<object>> GetComparisonData(
+            string itemId,
+            [FromQuery] string model = "realesrgan",
+            [FromQuery] int scale = 2,
+            CancellationToken cancellationToken = default)
+            => _imageEndpoints.GetComparisonData(itemId, model, scale, cancellationToken);
+
+        // ════════════════════════════════════════════════════════════════════
+        // Video Endpoints
+        // ════════════════════════════════════════════════════════════════════
+
+        [HttpPost("process")]
+        [Authorize]
+        [Consumes(MediaTypeNames.Application.Json)]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult<object>> ProcessVideo([FromBody] VideoProcessRequest request)
+            => _videoEndpoints.ProcessVideo(request);
+
+        [HttpPost("process/item/{itemId}")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult<object>> ProcessItem(string itemId, [FromQuery] string? model = null, [FromQuery] int? scale = null)
+            => _videoEndpoints.ProcessItem(itemId, model, scale);
+
+        [HttpGet("jobs")]
+        [Produces(MediaTypeNames.Application.Json)]
+        public ActionResult<object> GetActiveJobs()
+            => _videoEndpoints.GetActiveJobs();
+
+        [HttpPost("jobs/{jobId}/pause")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public ActionResult<object> PauseJob(string jobId)
+            => _videoEndpoints.PauseJob(jobId);
+
+        [HttpPost("jobs/{jobId}/resume")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public ActionResult<object> ResumeJob(string jobId)
+            => _videoEndpoints.ResumeJob(jobId);
+
+        [HttpPost("jobs/{jobId}/cancel")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public ActionResult<object> CancelJob(string jobId)
+            => _videoEndpoints.CancelJob(jobId);
+
+        [HttpPost("preprocess")]
+        [Authorize]
+        [Consumes(MediaTypeNames.Application.Json)]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult<object>> PreProcessVideo([FromBody] PreProcessRequest request)
+            => _videoEndpoints.PreProcessVideo(request);
+
+        // ════════════════════════════════════════════════════════════════════
+        // Queue Endpoints
+        // ════════════════════════════════════════════════════════════════════
+
+        [HttpGet("queue")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public ActionResult<object> GetQueueStatus()
+            => _queueEndpoints.GetQueueStatus();
+
+        [HttpPost("queue/add")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public ActionResult<object> EnqueueJob(
+            [FromQuery] string inputPath,
+            [FromQuery] string? outputPath = null,
+            [FromQuery] string? model = null,
+            [FromQuery] int priority = 5,
+            [FromQuery] string? itemName = null)
+            => _queueEndpoints.EnqueueJob(inputPath, outputPath, model, priority, itemName);
+
+        [HttpPost("queue/{jobId}/cancel")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public ActionResult<object> CancelQueuedJob(string jobId)
+            => _queueEndpoints.CancelQueuedJob(jobId);
+
+        [HttpPost("queue/{jobId}/priority")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public ActionResult<object> SetJobPriority(string jobId, [FromQuery] int priority)
+            => _queueEndpoints.SetJobPriority(jobId, priority);
+
+        [HttpPost("queue/pause")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public ActionResult<object> PauseQueue()
+            => _queueEndpoints.PauseQueue();
+
+        [HttpPost("queue/resume")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public ActionResult<object> ResumeQueue()
+            => _queueEndpoints.ResumeQueue();
+
+        // ════════════════════════════════════════════════════════════════════
+        // Diagnostics Endpoints
+        // ════════════════════════════════════════════════════════════════════
+
+        [HttpGet("service-health")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult<object>> CheckServiceHealth()
+            => _diagnosticsEndpoints.CheckServiceHealth();
+
+        [HttpGet("gpus")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult<object>> GetGpuList()
+            => _diagnosticsEndpoints.GetGpuList(HttpContext);
+
+        [HttpGet("metrics")]
+        [Authorize]
+        [Produces("text/plain")]
+        public Task<ActionResult> GetMetrics()
+            => _diagnosticsEndpoints.GetMetrics(HttpContext);
+
+        [HttpGet("gpu-verify")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult> GpuVerify()
+            => _diagnosticsEndpoints.GpuVerify(HttpContext);
+
+        [HttpGet("health/detailed")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult> HealthDetailed()
+            => _diagnosticsEndpoints.HealthDetailed(HttpContext);
+
+        [HttpGet("cache/stats")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public ActionResult<object> GetCacheStats()
+            => _diagnosticsEndpoints.GetCacheStats();
+
+        [HttpPost("cache/clear")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult<object>> ClearCache()
+            => _diagnosticsEndpoints.ClearCache();
+
+        [HttpPost("cache/config")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public ActionResult<object> ConfigurePreProcessingCache([FromBody] PreProcessingCacheRequest request)
+            => _diagnosticsEndpoints.ConfigurePreProcessingCache(request);
+
+        // ════════════════════════════════════════════════════════════════════
+        // Settings Endpoints
+        // ════════════════════════════════════════════════════════════════════
+
+        [HttpGet("settings/export")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public ActionResult<object> ExportSettings()
+            => _settingsEndpoints.ExportSettings();
+
+        [HttpPost("settings/import")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public ActionResult<object> ImportSettings([FromBody] System.Text.Json.JsonElement body)
+            => _settingsEndpoints.ImportSettings(body);
+
+        // ════════════════════════════════════════════════════════════════════
+        // Proxy Endpoints (AI Service)
+        // ════════════════════════════════════════════════════════════════════
+
+        [HttpPost("models/load")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult> LoadModel()
+            => _proxyEndpoints.LoadModel(HttpContext);
+
+        [HttpGet("model-benchmark")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult> ModelBenchmark()
+            => _proxyEndpoints.ModelBenchmark(HttpContext);
+
+        [HttpPost("face-restore/load")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult> FaceRestoreLoad([FromQuery] string model_name = "gfpgan-v1.4")
+            => _proxyEndpoints.FaceRestoreLoad(model_name, HttpContext);
+
+        [HttpGet("face-restore/status")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult> FaceRestoreStatus()
+            => _proxyEndpoints.FaceRestoreStatus(HttpContext);
+
+        [HttpPost("face-restore/unload")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult> FaceRestoreUnload()
+            => _proxyEndpoints.FaceRestoreUnload(HttpContext);
+
+        [HttpPost("service-config")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult> UpdateServiceConfig([FromQuery] bool? use_gpu, [FromQuery] int? max_concurrent, [FromQuery] int? gpu_device_id)
+            => _proxyEndpoints.UpdateServiceConfig(use_gpu, max_concurrent, gpu_device_id, HttpContext);
+
+        [HttpPost("upscale-frame")]
+        [Authorize]
+        [RequestSizeLimit(52_428_800)]
+        public Task<ActionResult> UpscaleFrame()
+            => _proxyEndpoints.UpscaleFrame(HttpContext);
+
+        [HttpPost("upscale-video-chunk")]
+        [Authorize]
+        [RequestSizeLimit(52_428_800)]
+        public Task<ActionResult> UpscaleVideoChunk()
+            => _proxyEndpoints.UpscaleVideoChunk(HttpContext);
+
+        [HttpGet("benchmark-frame")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult<object>> BenchmarkFrame([FromQuery] int width = 480, [FromQuery] int height = 270)
+            => _proxyEndpoints.BenchmarkFrame(width, height, HttpContext);
+
+        [HttpGet("benchmark")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult<object>> GetBenchmark()
+            => _proxyEndpoints.GetBenchmark(HttpContext);
+
+        [HttpGet("docker-benchmark")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult<object>> DockerBenchmark()
+            => _proxyEndpoints.DockerBenchmark(HttpContext);
+
+        // ════════════════════════════════════════════════════════════════════
+        // Utility Endpoints
+        // ════════════════════════════════════════════════════════════════════
+
+        [HttpGet("js/{name}")]
+        [Produces("text/javascript")]
+        public ActionResult GetJavaScript(string name)
+            => _utilityEndpoints.GetJavaScript(name);
+
+        [HttpGet("status")]
+        [Produces(MediaTypeNames.Application.Json)]
+        public ActionResult<object> GetStatus()
+            => _utilityEndpoints.GetStatus();
+
+        [HttpPost("test")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult<object>> TestUpscaling()
+            => _utilityEndpoints.TestUpscaling();
+
+        [HttpGet("info")]
+        [Produces(MediaTypeNames.Application.Json)]
+        public ActionResult<object> GetPluginInfo()
+            => _utilityEndpoints.GetPluginInfo();
+
+        [HttpPost("benchmark")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult<object>> RunHardwareBenchmark()
+            => _utilityEndpoints.RunHardwareBenchmark();
+
+        [HttpGet("hardware-info")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public ActionResult<object> GetHardwareInfo()
+            => _utilityEndpoints.GetHardwareInfo();
+
+        [HttpGet("recommendations")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult<object>> GetHardwareRecommendations()
+            => _utilityEndpoints.GetHardwareRecommendations();
+
+        [HttpGet("hardware")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult<object>> GetHardwareProfile()
+            => _utilityEndpoints.GetHardwareProfile();
+
+        [HttpGet("fallback")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult<object>> GetFallbackStatus()
+            => _utilityEndpoints.GetFallbackStatus();
+
+        [HttpPost("ssh/test")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult<object>> TestSshConnection([FromBody] SshTestRequest request)
+            => _utilityEndpoints.TestSshConnection(request);
+
+        [HttpPost("filter-preview")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public ActionResult<object> FilterPreview([FromQuery] string? preset)
+            => _utilityEndpoints.FilterPreview(preset);
+
+        [HttpGet("filter-preview/frame/{itemId}")]
+        [Authorize]
+        [Produces(MediaTypeNames.Application.Json)]
+        public Task<ActionResult<object>> GetFilterPreviewFrame(
+            string itemId,
+            [FromQuery] string preset = "none",
+            CancellationToken cancellationToken = default)
+            => _utilityEndpoints.GetFilterPreviewFrame(itemId, preset, cancellationToken);
+    }
+
+    /// <summary>
+    /// Request model for SSH connection test
+    /// </summary>
+    public class SshTestRequest
+    {
+        public string Host { get; set; } = "localhost";
+        public int Port { get; set; } = 2222;
+        public string User { get; set; } = "root";
+        public string KeyFile { get; set; } = "";
+    }
+}

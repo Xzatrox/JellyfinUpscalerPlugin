@@ -14,6 +14,7 @@ namespace JellyfinUpscalerPlugin.Services
         Task<bool> UninstallWrapperAsync();
         bool IsWrapperInstalled();
         string GetWrapperPath();
+        string GetOriginalFfmpegPath();
     }
 
     public class FFmpegWrapperService : IFFmpegWrapperService
@@ -23,6 +24,7 @@ namespace JellyfinUpscalerPlugin.Services
         private readonly IServerConfigurationManager _serverConfig;
         private readonly IMediaEncoder _mediaEncoder;
         private readonly string _pluginDirectory;
+        private string? _originalFfmpegPath;
 
         public FFmpegWrapperService(
             ILogger<FFmpegWrapperService> logger,
@@ -35,6 +37,13 @@ namespace JellyfinUpscalerPlugin.Services
             _serverConfig = serverConfig;
             _mediaEncoder = mediaEncoder;
             _pluginDirectory = Path.GetDirectoryName(typeof(Plugin).Assembly.Location) ?? string.Empty;
+            
+            // Load saved original FFmpeg path if it exists
+            var originalPathFile = Path.Combine(_pluginDirectory, "original_ffmpeg_path.txt");
+            if (File.Exists(originalPathFile))
+            {
+                _originalFfmpegPath = File.ReadAllText(originalPathFile).Trim();
+            }
         }
 
         public async Task<string> GenerateWrapperScriptAsync()
@@ -43,6 +52,7 @@ namespace JellyfinUpscalerPlugin.Services
             var scriptExtension = _platformService.GetScriptExtension();
             var wrapperPath = Path.Combine(_pluginDirectory, $"upscale-wrapper{scriptExtension}");
             var psScriptPath = Path.Combine(_pluginDirectory, "upscale-logic.ps1");
+            var framePipePath = Path.Combine(_pluginDirectory, "frame_pipe.py");
             
             // Determine real FFmpeg path
             var realFFmpegPath = _mediaEncoder.EncoderPath;
@@ -68,9 +78,16 @@ namespace JellyfinUpscalerPlugin.Services
             }
             else
             {
-                // Unix - not yet fully refactored for SSH in this step (as requested focus is Windows)
-                // But we keep existing logic + local fallback
+                // Unix - frame pipe logic for real-time upscaling
                 scriptContent = GenerateUnixScript(realFFmpegPath, logPath, activeMarkerPath);
+                
+                // Copy frame_pipe.py to plugin directory if it doesn't exist
+                var sourcePipePath = Path.Combine(Path.GetDirectoryName(typeof(Plugin).Assembly.Location) ?? "", "..", "Scripts", "frame_pipe.py");
+                if (File.Exists(sourcePipePath) && !File.Exists(framePipePath))
+                {
+                    File.Copy(sourcePipePath, framePipePath, true);
+                    _logger.LogInformation("Copied frame_pipe.py to plugin directory");
+                }
             }
 
             await File.WriteAllTextAsync(wrapperPath, scriptContent);
@@ -79,6 +96,7 @@ namespace JellyfinUpscalerPlugin.Services
             {
                 try
                 {
+                    // Make wrapper script executable
                     using var process = new System.Diagnostics.Process
                     {
                         StartInfo = new System.Diagnostics.ProcessStartInfo
@@ -92,6 +110,24 @@ namespace JellyfinUpscalerPlugin.Services
                     process.Start();
                     using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(10));
                     await process.WaitForExitAsync(cts.Token);
+                    
+                    // Make frame_pipe.py executable
+                    if (File.Exists(framePipePath))
+                    {
+                        using var process2 = new System.Diagnostics.Process
+                        {
+                            StartInfo = new System.Diagnostics.ProcessStartInfo
+                            {
+                                FileName = "chmod",
+                                Arguments = $"+x \"{framePipePath}\"",
+                                UseShellExecute = false,
+                                CreateNoWindow = true
+                            }
+                        };
+                        process2.Start();
+                        using var cts2 = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(10));
+                        await process2.WaitForExitAsync(cts2.Token);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -268,10 +304,162 @@ try {{
                 realFFmpegPath = "/usr/bin/ffmpeg";
             }
 
+            var config = Plugin.Instance?.Configuration;
+            var aiUrl = config?.AiServiceUrl ?? "http://localhost:5000";
+            var apiToken = config?.AiServiceApiToken ?? "";
+            var framePipePath = Path.Combine(_pluginDirectory, "frame_pipe.py");
+            
+            // Sanitize paths for bash
+            var sanitizedFramePipePath = framePipePath.Replace("\"", "\\\"");
+            var sanitizedAiUrl = aiUrl.Replace("\"", "\\\"");
+            var sanitizedApiToken = apiToken.Replace("\"", "\\\"");
+
             return $@"#!/bin/bash
-# AI Upscaler Plugin - Unix Wrapper (Placeholder for future SSH update)
+# AI Upscaler Plugin - FFmpeg Wrapper with Frame Pipe
 REAL_FFMPEG=""{realFFmpegPath}""
-exec ""$REAL_FFMPEG"" ""$@""
+AI_URL=""{sanitizedAiUrl}""
+API_TOKEN=""{sanitizedApiToken}""
+FRAME_PIPE=""{sanitizedFramePipePath}""
+ACTIVE_MARKER=""{activeMarkerPath}""
+LOG_FILE=""{logPath}""
+
+# If wrapper is not active, pass through to real FFmpeg
+if [ ! -f ""$ACTIVE_MARKER"" ]; then
+    exec ""$REAL_FFMPEG"" ""$@""
+fi
+
+# Detect if this is a video transcode (has -vcodec or -c:v, not audio-only or probe)
+IS_VIDEO_TRANSCODE=0
+HAS_VIDEO_CODEC=0
+IS_AUDIO_ONLY=0
+
+for arg in ""$@""; do
+    case ""$arg"" in
+        -vcodec|-c:v)
+            HAS_VIDEO_CODEC=1
+            ;;
+        -vn)
+            IS_AUDIO_ONLY=1
+            ;;
+        -version)
+            # FFmpeg version probe - pass through
+            exec ""$REAL_FFMPEG"" ""$@""
+            ;;
+    esac
+done
+
+# Only intercept video transcodes (not audio-only, not probes)
+if [ $HAS_VIDEO_CODEC -eq 1 ] && [ $IS_AUDIO_ONLY -eq 0 ]; then
+    IS_VIDEO_TRANSCODE=1
+fi
+
+# If not a video transcode, pass through
+if [ $IS_VIDEO_TRANSCODE -eq 0 ]; then
+    exec ""$REAL_FFMPEG"" ""$@""
+fi
+
+# Log the interception
+echo ""[$(date)] Intercepting video transcode for AI upscaling"" >> ""$LOG_FILE""
+
+# Extract input resolution from FFmpeg args
+# This is a simplified approach - in production, you'd parse more carefully
+INPUT_WIDTH=1920
+INPUT_HEIGHT=1080
+SCALE_FACTOR=2
+
+# Parse arguments to find input file and extract resolution
+INPUT_FILE=""""
+for i in ""${{!@}}""; do
+    if [ ""${{!i}}"" = ""-i"" ]; then
+        next_idx=$((i+1))
+        INPUT_FILE=""${{!next_idx}}""
+        break
+    fi
+done
+
+# Use ffprobe to get actual resolution if input file is available
+if [ -n ""$INPUT_FILE"" ] && [ -f ""$INPUT_FILE"" ]; then
+    PROBE_OUTPUT=$(""${{REAL_FFMPEG%/*}}/ffprobe"" -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 ""$INPUT_FILE"" 2>/dev/null)
+    if [ -n ""$PROBE_OUTPUT"" ]; then
+        INPUT_WIDTH=$(echo ""$PROBE_OUTPUT"" | cut -d'x' -f1)
+        INPUT_HEIGHT=$(echo ""$PROBE_OUTPUT"" | cut -d'x' -f2)
+    fi
+fi
+
+TARGET_WIDTH=$((INPUT_WIDTH * SCALE_FACTOR))
+TARGET_HEIGHT=$((INPUT_HEIGHT * SCALE_FACTOR))
+
+echo ""[$(date)] Input: ${{INPUT_WIDTH}}x${{INPUT_HEIGHT}}, Target: ${{TARGET_WIDTH}}x${{TARGET_HEIGHT}}"" >> ""$LOG_FILE""
+
+# Create temporary named pipes
+PIPE_IN=""/tmp/upscale_in_$$""
+PIPE_OUT=""/tmp/upscale_out_$$""
+mkfifo ""$PIPE_IN"" ""$PIPE_OUT""
+
+# Cleanup function
+cleanup() {{
+    rm -f ""$PIPE_IN"" ""$PIPE_OUT""
+}}
+trap cleanup EXIT
+
+# Check if Python3 and frame_pipe.py are available
+if [ ! -f ""$FRAME_PIPE"" ]; then
+    echo ""[$(date)] ERROR: frame_pipe.py not found at $FRAME_PIPE, falling back to direct FFmpeg"" >> ""$LOG_FILE""
+    exec ""$REAL_FFMPEG"" ""$@""
+fi
+
+if ! command -v python3 &> /dev/null; then
+    echo ""[$(date)] ERROR: python3 not found, falling back to direct FFmpeg"" >> ""$LOG_FILE""
+    exec ""$REAL_FFMPEG"" ""$@""
+fi
+
+# Start the frame pipe processor in background
+python3 ""$FRAME_PIPE"" \
+    --input ""$PIPE_IN"" \
+    --output ""$PIPE_OUT"" \
+    --ai-url ""$AI_URL"" \
+    --token ""$API_TOKEN"" \
+    --width ""$INPUT_WIDTH"" \
+    --height ""$INPUT_HEIGHT"" \
+    --scale ""$SCALE_FACTOR"" \
+    --drop-on-slow \
+    >> ""$LOG_FILE"" 2>&1 &
+
+FRAME_PIPE_PID=$!
+
+# Build FFmpeg decode command (extract frames to pipe)
+# We need to separate input args from output args
+DECODE_ARGS=()
+OUTPUT_ARGS=()
+FOUND_OUTPUT=0
+
+for arg in ""$@""; do
+    if [ ""$arg"" = ""-f"" ] || [ ""$arg"" = ""-vcodec"" ] || [ ""$arg"" = ""-c:v"" ]; then
+        FOUND_OUTPUT=1
+    fi
+    
+    if [ $FOUND_OUTPUT -eq 0 ]; then
+        DECODE_ARGS+=(""$arg"")
+    else
+        OUTPUT_ARGS+=(""$arg"")
+    fi
+done
+
+# Decode to raw frames and pipe to frame processor
+""$REAL_FFMPEG"" ""${{DECODE_ARGS[@]}}"" -f rawvideo -pix_fmt rgb24 ""$PIPE_IN"" &
+DECODE_PID=$!
+
+# Encode upscaled frames from pipe to final output
+""$REAL_FFMPEG"" -f rawvideo -pix_fmt rgb24 -s ""${{TARGET_WIDTH}}x${{TARGET_HEIGHT}}"" -i ""$PIPE_OUT"" ""${{OUTPUT_ARGS[@]}}""
+ENCODE_EXIT=$?
+
+# Wait for background processes
+wait $FRAME_PIPE_PID 2>/dev/null
+wait $DECODE_PID 2>/dev/null
+
+echo ""[$(date)] Transcode completed with exit code $ENCODE_EXIT"" >> ""$LOG_FILE""
+
+exit $ENCODE_EXIT
 ";
         }
 
@@ -279,14 +467,50 @@ exec ""$REAL_FFMPEG"" ""$@""
         {
             try
             {
+                // Generate the wrapper script
                 var wrapperPath = await GenerateWrapperScriptAsync();
                 
+                // Create active marker
                 var activeMarkerPath = Path.Combine(_pluginDirectory, "wrapper_active");
                 await File.WriteAllTextAsync(activeMarkerPath, DateTime.UtcNow.ToString("O"));
 
-                _logger.LogInformation("FFmpeg wrapper installed at: {WrapperPath}", wrapperPath);
-                _logger.LogInformation("IMPORTANT: Update Jellyfin's FFmpeg path to: {WrapperPath}", wrapperPath);
-                
+                // Auto-configure Jellyfin's FFmpeg path
+                try
+                {
+                    var encodingConfig = _serverConfig.GetConfiguration("encoding");
+                    var encodingConfigType = encodingConfig.GetType();
+                    var encoderPathProperty = encodingConfigType.GetProperty("EncoderAppPath");
+                    
+                    if (encoderPathProperty != null)
+                    {
+                        // Save original FFmpeg path before overwriting
+                        var currentPath = encoderPathProperty.GetValue(encodingConfig) as string;
+                        if (!string.IsNullOrEmpty(currentPath) && currentPath != wrapperPath)
+                        {
+                            _originalFfmpegPath = currentPath;
+                            var originalPathFile = Path.Combine(_pluginDirectory, "original_ffmpeg_path.txt");
+                            await File.WriteAllTextAsync(originalPathFile, currentPath);
+                            _logger.LogInformation("Saved original FFmpeg path: {OriginalPath}", currentPath);
+                        }
+                        
+                        // Set wrapper as new FFmpeg path
+                        encoderPathProperty.SetValue(encodingConfig, wrapperPath);
+                        _serverConfig.SaveConfiguration("encoding", encodingConfig);
+                        
+                        _logger.LogInformation("Auto-configured Jellyfin FFmpeg path to wrapper: {WrapperPath}", wrapperPath);
+                        _logger.LogWarning("IMPORTANT: Restart Jellyfin for the FFmpeg path change to take effect");
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Could not auto-configure FFmpeg path. Please manually set it to: {WrapperPath}", wrapperPath);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to auto-configure Jellyfin FFmpeg path. Please manually set it to: {WrapperPath}", wrapperPath);
+                }
+
+                _logger.LogInformation("FFmpeg wrapper installed successfully at: {WrapperPath}", wrapperPath);
                 return true;
             }
             catch (Exception ex)
@@ -300,14 +524,49 @@ exec ""$REAL_FFMPEG"" ""$@""
         {
             try
             {
+                // Remove active marker
                 var activeMarkerPath = Path.Combine(_pluginDirectory, "wrapper_active");
-                
                 if (File.Exists(activeMarkerPath))
                 {
                     File.Delete(activeMarkerPath);
                 }
 
-                _logger.LogInformation("FFmpeg wrapper uninstalled (marker file removed)");
+                // Restore original FFmpeg path
+                try
+                {
+                    if (!string.IsNullOrEmpty(_originalFfmpegPath))
+                    {
+                        var encodingConfig = _serverConfig.GetConfiguration("encoding");
+                        var encodingConfigType = encodingConfig.GetType();
+                        var encoderPathProperty = encodingConfigType.GetProperty("EncoderAppPath");
+                        
+                        if (encoderPathProperty != null)
+                        {
+                            encoderPathProperty.SetValue(encodingConfig, _originalFfmpegPath);
+                            _serverConfig.SaveConfiguration("encoding", encodingConfig);
+                            
+                            _logger.LogInformation("Restored original FFmpeg path: {OriginalPath}", _originalFfmpegPath);
+                            _logger.LogWarning("IMPORTANT: Restart Jellyfin for the FFmpeg path change to take effect");
+                        }
+                        
+                        // Clean up saved path file
+                        var originalPathFile = Path.Combine(_pluginDirectory, "original_ffmpeg_path.txt");
+                        if (File.Exists(originalPathFile))
+                        {
+                            File.Delete(originalPathFile);
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogWarning("No original FFmpeg path saved. Please manually restore FFmpeg path in Jellyfin settings");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to restore original FFmpeg path. Please manually restore it in Jellyfin settings");
+                }
+
+                _logger.LogInformation("FFmpeg wrapper uninstalled successfully");
                 return await Task.FromResult(true);
             }
             catch (Exception ex)
@@ -327,6 +586,11 @@ exec ""$REAL_FFMPEG"" ""$@""
         {
             var scriptExtension = _platformService.GetScriptExtension();
             return Path.Combine(_pluginDirectory, $"upscale-wrapper{scriptExtension}");
+        }
+
+        public string GetOriginalFfmpegPath()
+        {
+            return _originalFfmpegPath ?? _mediaEncoder.EncoderPath ?? "Unknown";
         }
     }
 }

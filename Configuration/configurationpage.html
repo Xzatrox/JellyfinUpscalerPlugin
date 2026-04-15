@@ -499,6 +499,63 @@
                         </div>
                     </details>
 
+                    <!-- FFmpeg Wrapper (Server-Side Real-Time Upscaling) -->
+                    <details>
+                        <summary>FFmpeg Wrapper (Server-Side Real-Time Upscaling)</summary>
+                        <div class="details-body">
+                            <p style="color:var(--text-secondary);font-size:0.85rem;margin-bottom:0.75rem;">
+                                Replace Jellyfin's FFmpeg with a wrapper that intercepts transcoding and pipes frames through the AI service for real-time upscaling.
+                                <strong style="color:var(--warning);">⚠️ Requires Jellyfin restart after install/uninstall.</strong>
+                            </p>
+                            
+                            <div class="upscaler-card" style="margin-bottom:0.75rem;">
+                                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
+                                    <div>
+                                        <strong style="color:var(--text-primary);">Status:</strong>
+                                        <span id="wrapper-status-badge" class="status-pill status-pill--checking">Checking...</span>
+                                    </div>
+                                    <div style="font-size:0.8rem;color:var(--text-muted);">
+                                        <span id="wrapper-platform"></span>
+                                    </div>
+                                </div>
+                                <div style="font-size:0.85rem;color:var(--text-secondary);margin-top:0.5rem;">
+                                    <div><strong>Wrapper Path:</strong> <code id="wrapper-path" style="color:var(--accent);font-size:0.8rem;">-</code></div>
+                                    <div style="margin-top:0.25rem;"><strong>Original FFmpeg:</strong> <code id="original-ffmpeg-path" style="color:var(--text-muted);font-size:0.8rem;">-</code></div>
+                                </div>
+                            </div>
+
+                            <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;">
+                                <button type="button" id="btn-install-wrapper" class="raised button-submit">
+                                    <i class="md-icon">download</i> Install Wrapper
+                                </button>
+                                <button type="button" id="btn-uninstall-wrapper" class="raised">
+                                    <i class="md-icon">delete</i> Uninstall Wrapper
+                                </button>
+                                <button type="button" id="btn-regenerate-wrapper" class="raised">
+                                    <i class="md-icon">refresh</i> Regenerate Script
+                                </button>
+                            </div>
+
+                            <div id="wrapper-message" style="padding:0.75rem;border-radius:6px;font-size:0.85rem;display:none;"></div>
+
+                            <details style="margin-top:0.75rem;">
+                                <summary style="cursor:pointer;color:var(--text-secondary);font-size:0.85rem;">How It Works</summary>
+                                <div style="margin-top:0.5rem;padding:0.75rem;background:rgba(0,0,0,0.2);border-radius:6px;font-size:0.8rem;color:var(--text-secondary);line-height:1.6;">
+                                    <p><strong>Architecture:</strong></p>
+                                    <ol style="margin:0.5rem 0 0 1.5rem;padding:0;">
+                                        <li>Jellyfin calls the wrapper instead of real FFmpeg</li>
+                                        <li>Wrapper detects video transcodes (ignores audio-only, probes, thumbnails)</li>
+                                        <li>Extracts frames as raw RGB24 via named pipes</li>
+                                        <li>Python helper (<code>frame_pipe.py</code>) POSTs each frame to Docker AI /upscale-frame</li>
+                                        <li>Upscaled frames are fed back into FFmpeg encoder</li>
+                                        <li>Client receives already-upscaled HLS/DASH stream</li>
+                                    </ol>
+                                    <p style="margin-top:0.75rem;"><strong>Performance:</strong> For real-time 24fps, use fast models like <code>span-x2</code> or <code>fsrcnn-x2</code> (~10-15ms/frame). Slower models will cause buffering but still work.</p>
+                                </div>
+                            </details>
+                        </div>
+                    </details>
+
                     <!-- Upscaling -->
                     <details open>
                         <summary>Upscaling</summary>
@@ -1349,6 +1406,54 @@
                     var el = page.querySelector('#' + id);
                     if (el) el.innerHTML = '<span style="color:#94a3b8;">Not configured</span>';
                 });
+            });
+        }
+
+        // ===== FFMPEG WRAPPER =====
+        function loadWrapperStatus(page) {
+            ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('upscaler/wrapper/status'), dataType: 'json' }).then(function(data) {
+                var badge = page.querySelector('#wrapper-status-badge');
+                var pathEl = page.querySelector('#wrapper-path');
+                var originalPathEl = page.querySelector('#original-ffmpeg-path');
+                var platformEl = page.querySelector('#wrapper-platform');
+                var messageEl = page.querySelector('#wrapper-message');
+                
+                if (data) {
+                    // Update status badge
+                    if (data.IsInstalled) {
+                        badge.textContent = 'Installed';
+                        badge.className = 'status-pill status-pill--online';
+                    } else {
+                        badge.textContent = 'Not Installed';
+                        badge.className = 'status-pill status-pill--offline';
+                    }
+                    
+                    // Update paths
+                    pathEl.textContent = data.WrapperPath || '-';
+                    platformEl.textContent = data.Platform + ' (' + data.RuntimeIdentifier + ')';
+                    
+                    // Try to get original FFmpeg path
+                    ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('Upscaler/service-health'), dataType: 'json' }).then(function(health) {
+                        if (health && health.ffmpegPath) {
+                            originalPathEl.textContent = health.ffmpegPath;
+                        }
+                    }).catch(function() {
+                        originalPathEl.textContent = 'Unknown';
+                    });
+                    
+                    // Hide message if no issues
+                    messageEl.style.display = 'none';
+                }
+            }).catch(function(err) {
+                var badge = page.querySelector('#wrapper-status-badge');
+                badge.textContent = 'Error';
+                badge.className = 'status-pill status-pill--offline';
+                
+                var messageEl = page.querySelector('#wrapper-message');
+                messageEl.textContent = 'Failed to load wrapper status';
+                messageEl.style.display = 'block';
+                messageEl.style.background = 'rgba(248,113,113,0.15)';
+                messageEl.style.color = '#f87171';
             });
         }
 

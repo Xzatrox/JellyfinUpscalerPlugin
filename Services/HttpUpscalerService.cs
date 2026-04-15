@@ -248,8 +248,9 @@ namespace JellyfinUpscalerPlugin.Services
                     using var content = new MultipartFormDataContent();
 
                     using var imageContent = new ByteArrayContent(imageData);
-                    imageContent.Headers.ContentType = new MediaTypeHeaderValue("image/png");
-                    content.Add(imageContent, "file", "frame.png");
+                    var isJpeg = imageData.Length >= 2 && imageData[0] == 0xFF && imageData[1] == 0xD8;
+                    imageContent.Headers.ContentType = new MediaTypeHeaderValue(isJpeg ? "image/jpeg" : "image/png");
+                    content.Add(imageContent, "file", isJpeg ? "frame.jpg" : "frame.png");
                     content.Add(new StringContent(scale.ToString()), "scale");
 
                     if (attempt == 0)

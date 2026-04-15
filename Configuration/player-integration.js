@@ -189,7 +189,7 @@
                 videoFps = (video.getVideoPlaybackQuality && video.getVideoPlaybackQuality().totalVideoFrames > 0) ? 30 : 24;
                 videoFps *= rate;
             } catch(e) {}
-            if (benchmark.fps >= videoFps * 0.8) return 'server';
+            if (benchmark.fps >= videoFps * 0.5) return 'server';
             return 'webgl';
         },
 
@@ -212,8 +212,8 @@
                 return;
             }
             var paths = [
-                '/api/upscaler/js/webgl-upscaler.js',
-                '/upscaler/js/webgl-upscaler.js'
+                '/web/configurationpage?name=UPSCALERWebGLShader',
+                '/api/upscaler/js/webgl-upscaler.js'
             ];
             var tryLoad = function(idx) {
                 if (idx >= paths.length) {
@@ -531,6 +531,8 @@
             if (isVideoPage) {
                 this._buttonInjected = false;
                 this.injectPlayerButton();
+                // Start real-time upscaling when video page appears
+                setTimeout(function() { PlayerIntegration.startRealtimeUpscaling(); }, 1500);
             }
         },
 
@@ -624,6 +626,9 @@
                 } catch (err) {
                     console.warn('AI Upscaler: Could not attach playback listeners:', err);
                 }
+            } else {
+                // playbackManager not ready yet, retry
+                setTimeout(function() { PlayerIntegration.attachPlaybackListeners(); }, 1000);
             }
         },
 
@@ -1048,9 +1053,13 @@
             this.getPluginConfig().then(function(config) {
                 var newState = !config.EnablePlugin;
                 PlayerIntegration.updatePluginConfig({ EnablePlugin: newState });
-                // Live-update switch visual without closing the menu
                 var sw = document.querySelector('#aiUpscalerQuickMenu .ai-menu__switch');
                 if (sw) sw.classList.toggle('ai-menu__switch--on', newState);
+                if (newState) {
+                    PlayerIntegration.startRealtimeUpscaling();
+                } else {
+                    RealtimeUpscaler.stop();
+                }
                 PlayerIntegration.showPlayerNotification(
                     'Upscaling ' + (newState ? 'enabled' : 'disabled'),
                     newState ? 'success' : 'warning'
@@ -1097,17 +1106,18 @@
 
                 var mode = (config.RealtimeMode || 'auto').toLowerCase();
 
-                // Skip upscaling if source resolution is already high enough
-                if (video.videoWidth >= 1920) {
-                    console.log('AI Upscaler RT: Source resolution already high enough (' + video.videoWidth + 'x' + video.videoHeight + '), skipping real-time upscaling');
-                    return;
-                }
-
                 // If mode is auto or server, run benchmark first
                 if (mode === 'auto' || mode === 'server') {
                     var captureW = config.RealtimeCaptureWidth || 480;
-                    var captureH = Math.round(captureW * (video.videoHeight / video.videoWidth));
+                    var captureH = Math.round(captureW * (video.videoHeight / video.videoWidth)) || 270;
                     ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('Upscaler/benchmark-frame') + '?width=' + captureW + '&height=' + captureH, dataType: 'json' })
+                        .then(function(bench) {
+                            // benchmark-frame returns {error:...} on warmup failure — fall back to /benchmark
+                            if (bench && bench.error) {
+                                return ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('Upscaler/benchmark'), dataType: 'json' });
+                            }
+                            return bench;
+                        })
                         .then(function(bench) {
                             console.log('AI Upscaler RT: Benchmark result', bench);
                             RealtimeUpscaler.start(video, config, bench);
