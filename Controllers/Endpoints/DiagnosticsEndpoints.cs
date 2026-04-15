@@ -13,7 +13,10 @@ namespace JellyfinUpscalerPlugin.Controllers.Endpoints
     /// Diagnostic and health monitoring endpoints.
     /// Provides service health checks, GPU verification, metrics, and cache statistics.
     /// </summary>
-    public class DiagnosticsEndpoints
+    [ApiController]
+    [Authorize]
+    [Route("Upscaler")]
+    public class DiagnosticsEndpoints : ControllerBase
     {
         private readonly ILogger<DiagnosticsEndpoints> _logger;
         private readonly HardwareBenchmarkService _benchmarkService;

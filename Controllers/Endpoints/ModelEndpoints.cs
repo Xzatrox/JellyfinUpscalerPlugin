@@ -15,6 +15,7 @@ namespace JellyfinUpscalerPlugin.Controllers.Endpoints
     /// </summary>
     [ApiController]
     [Authorize]
+    [Route("Upscaler")]
     public class ModelEndpoints : ControllerBase
     {
         private readonly ILogger<ModelEndpoints> _logger;
@@ -49,7 +50,7 @@ namespace JellyfinUpscalerPlugin.Controllers.Endpoints
         /// <summary>
         /// Get available AI models from the Docker service.
         /// </summary>
-        [HttpGet("Upscaler/models")]
+        [HttpGet("models")]
         [Produces(MediaTypeNames.Application.Json)]
         public async Task<ActionResult> GetAvailableModels()
         {
@@ -80,7 +81,7 @@ namespace JellyfinUpscalerPlugin.Controllers.Endpoints
         /// <summary>
         /// Load a model on the Docker AI service.
         /// </summary>
-        [HttpPost("Upscaler/models/load")]
+        [HttpPost("models/load")]
         [Produces(MediaTypeNames.Application.Json)]
         public async Task<ActionResult> LoadModel()
         {
@@ -146,7 +147,7 @@ namespace JellyfinUpscalerPlugin.Controllers.Endpoints
         /// <summary>
         /// Run benchmark on the currently loaded model.
         /// </summary>
-        [HttpGet("Upscaler/model-benchmark")]
+        [HttpGet("model-benchmark")]
         [Produces(MediaTypeNames.Application.Json)]
         public async Task<ActionResult> ModelBenchmark()
         {
@@ -167,7 +168,7 @@ namespace JellyfinUpscalerPlugin.Controllers.Endpoints
         /// <summary>
         /// Get model disk usage from Docker service.
         /// </summary>
-        [HttpGet("Upscaler/models/disk-usage")]
+        [HttpGet("models/disk-usage")]
         [Produces(MediaTypeNames.Application.Json)]
         public async Task<ActionResult> ModelsDiskUsage()
         {
@@ -188,7 +189,7 @@ namespace JellyfinUpscalerPlugin.Controllers.Endpoints
         /// <summary>
         /// Model cleanup on Docker service (LRU removal of unused models).
         /// </summary>
-        [HttpPost("Upscaler/models/cleanup")]
+        [HttpPost("models/cleanup")]
         [Produces(MediaTypeNames.Application.Json)]
         public async Task<ActionResult> ModelsCleanup([FromQuery] int max_age_days = 30, [FromQuery] bool dry_run = true)
         {

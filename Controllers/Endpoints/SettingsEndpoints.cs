@@ -16,7 +16,10 @@ namespace JellyfinUpscalerPlugin.Controllers.Endpoints
     /// Settings management endpoints for configuration import/export and fallback status.
     /// Handles plugin configuration with validation and security checks.
     /// </summary>
-    public class SettingsEndpoints
+    [ApiController]
+    [Authorize]
+    [Route("Upscaler")]
+    public class SettingsEndpoints : ControllerBase
     {
         private readonly ILogger<SettingsEndpoints> _logger;
         private readonly HardwareBenchmarkService _benchmarkService;

@@ -16,7 +16,10 @@ namespace JellyfinUpscalerPlugin.Controllers.Endpoints
     /// AI service proxy endpoints for model management, face restoration, and service configuration.
     /// Forwards requests to the Docker AI service with validation and security checks.
     /// </summary>
-    public class ProxyEndpoints
+    [ApiController]
+    [Authorize]
+    [Route("Upscaler")]
+    public class ProxyEndpoints : ControllerBase
     {
         private static readonly Regex ValidModelNameRegex = new(@"^[a-zA-Z0-9\-_]+$", RegexOptions.Compiled);
 

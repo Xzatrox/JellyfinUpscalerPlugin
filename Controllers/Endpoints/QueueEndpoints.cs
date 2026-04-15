@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using MediaBrowser.Controller.Library;
 using JellyfinUpscalerPlugin.Services;
 using JellyfinUpscalerPlugin.Models;
+using IOFile = System.IO.File;
 
 namespace JellyfinUpscalerPlugin.Controllers.Endpoints
 {
@@ -16,7 +17,10 @@ namespace JellyfinUpscalerPlugin.Controllers.Endpoints
     /// Queue management endpoints for video processing queue operations.
     /// Handles job enqueueing, cancellation, priority management, and queue control.
     /// </summary>
-    public class QueueEndpoints
+    [ApiController]
+    [Authorize]
+    [Route("Upscaler")]
+    public class QueueEndpoints : ControllerBase
     {
         private static readonly Regex ValidModelNameRegex = new(@"^[a-zA-Z0-9\-_]+$", RegexOptions.Compiled);
 
@@ -66,7 +70,7 @@ namespace JellyfinUpscalerPlugin.Controllers.Endpoints
 
             // Path traversal protection — normalize and validate against library paths (allowlist)
             inputPath = Path.GetFullPath(inputPath);
-            if (!File.Exists(inputPath))
+            if (!IOFile.Exists(inputPath))
                 return new BadRequestObjectResult(new { success = false, error = "Input file does not exist" });
 
             var libraryFolders = _libraryManager.GetVirtualFolders();

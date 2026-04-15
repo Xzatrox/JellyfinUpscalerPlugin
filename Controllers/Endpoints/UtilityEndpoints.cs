@@ -22,7 +22,9 @@ namespace JellyfinUpscalerPlugin.Controllers.Endpoints
     /// Utility endpoints for plugin status, JavaScript resources, SSH testing, and filter previews.
     /// Provides miscellaneous functionality that doesn't fit into other endpoint categories.
     /// </summary>
-    public class UtilityEndpoints
+    [ApiController]
+    [Route("Upscaler")]
+    public class UtilityEndpoints : ControllerBase
     {
         private readonly ILogger<UtilityEndpoints> _logger;
         private readonly ILibraryManager _libraryManager;

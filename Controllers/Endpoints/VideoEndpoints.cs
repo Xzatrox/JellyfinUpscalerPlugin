@@ -19,6 +19,7 @@ namespace JellyfinUpscalerPlugin.Controllers.Endpoints
     /// </summary>
     [ApiController]
     [Authorize]
+    [Route("Upscaler")]
     public class VideoEndpoints : ControllerBase
     {
         private readonly ILogger<VideoEndpoints> _logger;
@@ -38,7 +39,7 @@ namespace JellyfinUpscalerPlugin.Controllers.Endpoints
         /// <summary>
         /// Process a video file with AI upscaling.
         /// </summary>
-        [HttpPost("Upscaler/process")]
+        [HttpPost("process")]
         [Consumes(MediaTypeNames.Application.Json)]
         [Produces(MediaTypeNames.Application.Json)]
         public async Task<ActionResult<object>> ProcessVideo([FromBody] VideoProcessRequest request)
@@ -89,7 +90,7 @@ namespace JellyfinUpscalerPlugin.Controllers.Endpoints
         /// <summary>
         /// Process a library item by ID.
         /// </summary>
-        [HttpPost("Upscaler/process/item/{itemId}")]
+        [HttpPost("process/item/{itemId}")]
         [Produces(MediaTypeNames.Application.Json)]
         public async Task<ActionResult<object>> ProcessItem(
             string itemId, 
@@ -149,7 +150,7 @@ namespace JellyfinUpscalerPlugin.Controllers.Endpoints
         /// <summary>
         /// Get active video processing jobs.
         /// </summary>
-        [HttpGet("Upscaler/jobs")]
+        [HttpGet("jobs")]
         [Produces(MediaTypeNames.Application.Json)]
         public ActionResult<object> GetActiveJobs()
         {
@@ -168,7 +169,7 @@ namespace JellyfinUpscalerPlugin.Controllers.Endpoints
         /// <summary>
         /// Pause a video processing job.
         /// </summary>
-        [HttpPost("Upscaler/jobs/{jobId}/pause")]
+        [HttpPost("jobs/{jobId}/pause")]
         [Produces(MediaTypeNames.Application.Json)]
         public ActionResult<object> PauseJob(string jobId)
         {
@@ -189,7 +190,7 @@ namespace JellyfinUpscalerPlugin.Controllers.Endpoints
         /// <summary>
         /// Resume a paused video processing job.
         /// </summary>
-        [HttpPost("Upscaler/jobs/{jobId}/resume")]
+        [HttpPost("jobs/{jobId}/resume")]
         [Produces(MediaTypeNames.Application.Json)]
         public ActionResult<object> ResumeJob(string jobId)
         {
@@ -210,7 +211,7 @@ namespace JellyfinUpscalerPlugin.Controllers.Endpoints
         /// <summary>
         /// Cancel a video processing job.
         /// </summary>
-        [HttpPost("Upscaler/jobs/{jobId}/cancel")]
+        [HttpPost("jobs/{jobId}/cancel")]
         [Produces(MediaTypeNames.Application.Json)]
         public ActionResult<object> CancelJob(string jobId)
         {

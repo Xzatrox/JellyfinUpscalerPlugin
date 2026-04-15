@@ -24,6 +24,7 @@ namespace JellyfinUpscalerPlugin.Controllers.Endpoints
     /// </summary>
     [ApiController]
     [Authorize]
+    [Route("Upscaler")]
     public class ImageEndpoints : ControllerBase
     {
         private const long MaxUploadSizeBytes = 50 * 1024 * 1024; // 50 MB
@@ -51,7 +52,7 @@ namespace JellyfinUpscalerPlugin.Controllers.Endpoints
         /// <summary>
         /// Upscale a raw image (binary upload).
         /// </summary>
-        [HttpPost("Upscaler/upscale/image")]
+        [HttpPost("upscale/image")]
         [Consumes("application/octet-stream")]
         [Produces("application/octet-stream")]
         [RequestSizeLimit(52428800)] // 50MB max
@@ -95,7 +96,7 @@ namespace JellyfinUpscalerPlugin.Controllers.Endpoints
         /// <summary>
         /// Upscale all images for a library item (poster, backdrop, thumbnail, logo).
         /// </summary>
-        [HttpPost("Upscaler/upscale-images/{itemId}")]
+        [HttpPost("upscale-images/{itemId}")]
         [Produces(MediaTypeNames.Application.Json)]
         public async Task<ActionResult<object>> UpscaleItemImages(
             string itemId,
@@ -196,7 +197,7 @@ namespace JellyfinUpscalerPlugin.Controllers.Endpoints
         /// <summary>
         /// Get comparison data for a video item (original vs upscaled frame).
         /// </summary>
-        [HttpGet("Upscaler/compare/{itemId}")]
+        [HttpGet("compare/{itemId}")]
         [Produces(MediaTypeNames.Application.Json)]
         public async Task<ActionResult<object>> GetComparisonData(
             string itemId,
