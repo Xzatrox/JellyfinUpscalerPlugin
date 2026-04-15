@@ -2402,7 +2402,7 @@
                     return fetch(ApiClient.getUrl('Upscaler/face-restore/frame'), {
                         method: 'POST',
                         body: blob,
-                        headers: ApiClient.getRequestHeaders ? ApiClient.getRequestHeaders() : {}
+                        headers: ApiClient.accessToken ? { 'Authorization': 'MediaBrowser Token="' + ApiClient.accessToken() + '"' } : {}
                     });
                 }).then(function(resp) {
                     if (!resp.ok) throw new Error('HTTP ' + resp.status);

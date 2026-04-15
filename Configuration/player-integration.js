@@ -346,7 +346,9 @@
 
                 fetch(ApiClient.getUrl('Upscaler/upscale-frame'), {
                     method: 'POST',
-                    body: blob
+                    body: blob,
+                    credentials: 'include',
+                    headers: ApiClient.accessToken ? { 'Authorization': 'MediaBrowser Token="' + ApiClient.accessToken() + '"' } : {}
                 }).then(function(resp) {
                     if (resp.status === 503) {
                         // Server busy, skip frame
@@ -684,13 +686,7 @@
         },
 
         _fetchModelStates: function() {
-            return fetch(ApiClient.getUrl('Upscaler/models'), {
-                credentials: 'include',
-                headers: { 'X-Emby-Authorization': ApiClient.getRequestHeader ? ApiClient.getRequestHeader() : '' }
-            }).then(function(r) {
-                if (!r.ok) throw new Error('HTTP ' + r.status);
-                return r.json();
-            }).then(function(data) {
+            return ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('Upscaler/models'), dataType: 'json' }).then(function(data) {
                 var map = {};
                 (data.models || []).forEach(function(m) {
                     map[m.id] = { downloaded: !!m.downloaded, available: m.available !== false, loaded: !!m.loaded };
@@ -991,20 +987,7 @@
 
             this.updatePluginConfig({ Model: model }).then(function() {
                 var loadUrl = ApiClient.getUrl('Upscaler/models/load') + '?model_name=' + encodeURIComponent(model);
-                return fetch(loadUrl, {
-                    method: 'POST',
-                    headers: { 'X-Emby-Authorization': ApiClient.getRequestHeader ? ApiClient.getRequestHeader() : '' },
-                    credentials: 'include'
-                }).then(function(r) {
-                    if (!r.ok) {
-                        return r.text().then(function(t) {
-                            var detail = t;
-                            try { var j = JSON.parse(t); detail = j.detail || j.message || t; } catch (e) {}
-                            throw new Error('HTTP ' + r.status + ': ' + (detail || 'model load failed'));
-                        });
-                    }
-                    return r.json().catch(function() { return {}; });
-                });
+                return ApiClient.ajax({ type: 'POST', url: loadUrl, dataType: 'json' });
             }).then(function() {
                 // Update active styling + refresh states
                 if (menu) {
@@ -1124,8 +1107,7 @@
                 if (mode === 'auto' || mode === 'server') {
                     var captureW = config.RealtimeCaptureWidth || 480;
                     var captureH = Math.round(captureW * (video.videoHeight / video.videoWidth));
-                    fetch(ApiClient.getUrl('Upscaler/benchmark-frame') + '?width=' + captureW + '&height=' + captureH)
-                        .then(function(r) { return r.json(); })
+                    ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('Upscaler/benchmark-frame') + '?width=' + captureW + '&height=' + captureH, dataType: 'json' })
                         .then(function(bench) {
                             console.log('AI Upscaler RT: Benchmark result', bench);
                             RealtimeUpscaler.start(video, config, bench);
